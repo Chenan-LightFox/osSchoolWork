@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: osSchoolWork-backend
+  datasource:
+    url: jdbc:mysql://localhost:3306/os_school_work?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+jwt:
+  secret: a8a20e53a0497efec8f6a6bc0a6f7672eec5d58f9d8bb65f7762d8fd29e1f4de
+  expiration-ms: 86400000
