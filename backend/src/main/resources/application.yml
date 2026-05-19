@@ -12,5 +12,6 @@ mybatis-plus:
     map-underscore-to-camel-case: true
 
 jwt:
+  # Must be provided via environment variable and be at least 32 bytes for HS256.
   secret: ${JWT_SECRET}
   expiration-ms: ${JWT_EXPIRATION_MS:86400000}

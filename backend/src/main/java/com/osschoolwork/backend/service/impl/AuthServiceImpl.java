@@ -18,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
+    private static final String DUMMY_BCRYPT_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
+
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenUtil jwtTokenUtil;
@@ -25,9 +27,9 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        User existing = userMapper.selectOne(new LambdaQueryWrapper<User>()
+        Long existingCount = userMapper.selectCount(new LambdaQueryWrapper<User>()
                 .eq(User::getEmail, request.getEmail()));
-        if (existing != null) {
+        if (existingCount != null && existingCount > 0) {
             throw new BusinessException(409, "邮箱已存在");
         }
 
@@ -44,7 +46,11 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponse login(LoginRequest request) {
         User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
                 .eq(User::getEmail, request.getEmail()));
-        if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+        if (user == null) {
+            passwordEncoder.matches(request.getPassword(), DUMMY_BCRYPT_HASH);
+            throw new BusinessException(401, "邮箱或密码错误");
+        }
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new BusinessException(401, "邮箱或密码错误");
         }
 

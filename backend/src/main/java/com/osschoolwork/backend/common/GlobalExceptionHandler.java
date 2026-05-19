@@ -23,7 +23,7 @@ public class GlobalExceptionHandler {
     public ApiResponse<Void> handleValidationException(MethodArgumentNotValidException exception) {
         String message = exception.getBindingResult().getFieldErrors().stream()
                 .findFirst()
-                .map(error -> error.getField() + " " + error.getDefaultMessage())
+                .map(error -> error.getDefaultMessage() == null ? "请求参数不合法" : error.getDefaultMessage())
                 .orElse("请求参数不合法");
         return ApiResponse.error(400, message);
     }
