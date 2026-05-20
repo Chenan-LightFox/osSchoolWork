@@ -1,14 +1,31 @@
 package com.osschoolwork.backend.dto;
 
-import lombok.Builder;
-import lombok.Data;
-
-@Data
-@Builder
 public class AuthResponse {
 
-    private Long userId;
-    private String email;
-    private String username;
     private String token;
+    private UserView user;
+
+    public AuthResponse() {
+    }
+
+    public AuthResponse(String token, UserView user) {
+        this.token = token;
+        this.user = user;
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public void setToken(String token) {
+        this.token = token;
+    }
+
+    public UserView getUser() {
+        return user;
+    }
+
+    public void setUser(UserView user) {
+        this.user = user;
+    }
 }

@@ -58,10 +58,10 @@ npm install
 npm run dev
 ```
 
-默认会将 `/api` 代理到 `http://localhost:8080`，如需指定后端地址可设置环境变量：
+默认会将 `/api` 代理到 `http://localhost:8081`，如需指定后端地址可设置环境变量：
 
 ```bash
-VITE_API_BASE_URL=http://localhost:8080
+VITE_API_BASE_URL=http://localhost:8081
 ```
 
 ### APP（展示加分项）

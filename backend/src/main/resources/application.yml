@@ -1,10 +1,11 @@
+server:
+  port: 8081
+
 spring:
-  application:
-    name: osSchoolWork-backend
   datasource:
-    url: ${DB_URL:jdbc:mysql://localhost:3306/os_school_work?useSSL=true&serverTimezone=UTC}
-    username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:}
+    url: jdbc:mysql://localhost:3306/os_school?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: 
     driver-class-name: com.mysql.cj.jdbc.Driver
 
 mybatis-plus:
@@ -12,6 +13,6 @@ mybatis-plus:
     map-underscore-to-camel-case: true
 
 jwt:
-  # Must be provided via environment variable and be at least 32 bytes for HS256.
-  secret: ${JWT_SECRET}
-  expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  secret: change-this-secret-to-32-bytes-minimum
+  expire-minutes: 120
+  issuer: osSchoolWork
