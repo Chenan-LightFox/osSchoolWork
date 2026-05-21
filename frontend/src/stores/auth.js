@@ -8,6 +8,7 @@ const state = reactive({
 })
 
 const loadStoredAuth = () => {
+  // 从 localStorage 读取登录态
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
@@ -19,11 +20,13 @@ const loadStoredAuth = () => {
 
 const stored = loadStoredAuth()
 if (stored?.token) {
+  // 启动时恢复登录态
   state.token = stored.token
   state.user = stored.user ?? null
 }
 
 const persist = () => {
+  // 同步保存登录态
   if (!state.token) {
     localStorage.removeItem(STORAGE_KEY)
     return

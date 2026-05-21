@@ -1,9 +1,11 @@
 package com.osschoolwork.backend.interceptor;
 
+import org.springframework.web.servlet.HandlerInterceptor;
+
 import com.osschoolwork.backend.util.JwtUtil;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.web.servlet.HandlerInterceptor;
 
 public class JwtAuthInterceptor implements HandlerInterceptor {
 
@@ -15,17 +17,20 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // 从请求头读取 Bearer token
         String auth = request.getHeader("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) {
             writeUnauthorized(response);
             return false;
         }
         String token = auth.substring(7);
+        // 解析 userId，失败则拒绝访问
         Long userId = jwtUtil.parseUserId(token);
         if (userId == null) {
             writeUnauthorized(response);
             return false;
         }
+        // 把 userId 写入请求上下文，供后续使用
         request.setAttribute("userId", userId);
         return true;
     }

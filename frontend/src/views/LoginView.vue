@@ -28,12 +28,14 @@ const rules = {
 const handleSubmit = async () => {
   if (!formRef.value) return
   try {
+    // 表单校验通过后提交登录
     await formRef.value.validate()
     loading.value = true
     const data = await login({
       email: form.email,
       password: form.password,
     })
+    // 写入本地登录态
     setAuth({
       token: data.token,
       user: {
@@ -43,6 +45,7 @@ const handleSubmit = async () => {
       },
     })
     ElMessage.success('登录成功')
+    // 回到原目标或默认页
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     router.push(redirect)
   } catch (error) {

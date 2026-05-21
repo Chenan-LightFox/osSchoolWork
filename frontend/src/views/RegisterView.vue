@@ -19,6 +19,7 @@ const form = reactive({
 })
 
 const validateConfirm = (rule, value, callback) => {
+  // 确认密码一致性校验
   if (!value) {
     callback(new Error('请再次输入密码'))
     return
@@ -49,6 +50,7 @@ const rules = {
 const handleSubmit = async () => {
   if (!formRef.value) return
   try {
+    // 表单校验通过后提交注册
     await formRef.value.validate()
     loading.value = true
     const data = await register({
@@ -56,6 +58,7 @@ const handleSubmit = async () => {
       username: form.username,
       password: form.password,
     })
+    // 写入本地登录态
     setAuth({
       token: data.token,
       user: {

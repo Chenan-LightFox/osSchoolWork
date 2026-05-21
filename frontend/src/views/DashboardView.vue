@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { currentUser, isAuthenticated } from '@/stores/auth'
 
 const user = computed(() => currentUser.value || {})
+// 展示用的用户快照，避免模板中空值判断过多
 </script>
 
 <template>

@@ -32,6 +32,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
+  // 基于 token 的前端路由守卫
   const isAuthed = Boolean(getToken())
   if (to.meta.requiresAuth && !isAuthed) {
     return { name: 'login', query: { redirect: to.fullPath } }
