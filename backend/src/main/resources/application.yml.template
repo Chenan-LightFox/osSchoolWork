@@ -1,0 +1,18 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/os_school?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: Add-your-username
+    password: Add-your-password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+jwt:
+  secret: Add-your-secret-key
+  expire-minutes: 120
+  issuer: osSchoolWork
