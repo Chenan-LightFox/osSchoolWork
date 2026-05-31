@@ -307,13 +307,14 @@ mail
 
 字段：
 
-| 字段        | 说明   |
-| --------- | ---- |
-| id        | 邮件ID |
-| sender_id | 发件人  |
-| subject   | 主题   |
-| content   | 正文   |
-| send_time | 时间   |
+| 字段        | 说明              |
+| --------- | --------------- |
+| id        | 邮件ID            |
+| sender_id | 发件人             |
+| subject   | 主题              |
+| content   | 正文              |
+| status    | DRAFT(草稿)/SENT(已发送) |
+| send_time | 时间              |
 
 ---
 
@@ -332,13 +333,14 @@ mail
 
 ## receiver 表
 
-| 字段          | 说明      |
-| ----------- | ------- |
-| mail_id     | 邮件      |
-| receiver_id | 收件人     |
-| is_read     | 已读      |
-| deleted     | 删除      |
-| folder      | 收件箱/垃圾箱 |
+| 字段            | 说明           |
+| ------------- | ------------ |
+| mail_id       | 邮件           |
+| receiver_id   | 收件人          |
+| receiver_type | TO(收件人)/CC(抄送) |
+| is_read       | 已读           |
+| deleted       | 删除           |
+| folder        | 收件箱/垃圾箱      |
 
 ---
 
@@ -350,12 +352,13 @@ attachment
 
 字段：
 
-| 字段        | 说明  |
-| --------- | --- |
-| mail_id   | 邮件  |
-| file_name | 文件名 |
-| file_path | 路径  |
-| file_size | 大小  |
+| 字段          | 说明   |
+| ----------- | ---- |
+| mail_id     | 邮件   |
+| file_name   | 文件名  |
+| file_path   | 路径   |
+| file_size   | 大小   |
+| upload_time | 上传时间 |
 
 ---
 
