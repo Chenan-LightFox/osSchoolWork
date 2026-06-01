@@ -1,5 +1,19 @@
 package com.osschoolwork.backend.service.impl;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.osschoolwork.backend.dto.MailDetailView;
 import com.osschoolwork.backend.dto.MailView;
@@ -13,19 +27,9 @@ import com.osschoolwork.backend.mapper.AttachmentMapper;
 import com.osschoolwork.backend.mapper.MailMapper;
 import com.osschoolwork.backend.mapper.ReceiverMapper;
 import com.osschoolwork.backend.mapper.UserMapper;
+import com.osschoolwork.backend.service.AttachmentService;
 import com.osschoolwork.backend.service.MailService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import com.osschoolwork.backend.websocket.WebSocketNotifier;
 
 @Service
 public class MailServiceImpl implements MailService {
@@ -34,16 +38,22 @@ public class MailServiceImpl implements MailService {
     private final ReceiverMapper receiverMapper;
     private final AttachmentMapper attachmentMapper;
     private final UserMapper userMapper;
+    private final WebSocketNotifier webSocketNotifier;
+    private final AttachmentService attachmentService;
 
     @Autowired
     public MailServiceImpl(MailMapper mailMapper,
                            ReceiverMapper receiverMapper,
                            AttachmentMapper attachmentMapper,
-                           UserMapper userMapper) {
+                           UserMapper userMapper,
+                           WebSocketNotifier webSocketNotifier,
+                           AttachmentService attachmentService) {
         this.mailMapper = mailMapper;
         this.receiverMapper = receiverMapper;
         this.attachmentMapper = attachmentMapper;
         this.userMapper = userMapper;
+        this.webSocketNotifier = webSocketNotifier;
+        this.attachmentService = attachmentService;
     }
 
     @Override
@@ -117,6 +127,81 @@ public class MailServiceImpl implements MailService {
     @Transactional
     @Override
     public Long sendMail(Long userId, SendMailRequest request) {
+        SendResult result = createMailAndReceivers(userId, request);
+        webSocketNotifier.notifyNewMail(result.receiverIds, result.mail.getId(), userId, result.mail.getSubject());
+        return result.mail.getId();
+    }
+
+    @Transactional
+    @Override
+    public Long sendMailWithAttachments(Long userId, SendMailRequest request, List<MultipartFile> files) {
+        SendResult result = createMailAndReceivers(userId, request);
+        if (files != null) {
+            for (MultipartFile file : files) {
+                if (file == null || file.isEmpty()) {
+                    continue;
+                }
+                attachmentService.upload(userId, result.mail.getId(), file);
+            }
+        }
+        webSocketNotifier.notifyNewMail(result.receiverIds, result.mail.getId(), userId, result.mail.getSubject());
+        return result.mail.getId();
+    }
+
+    @Override
+    public void markAsRead(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "邮件不存在");
+        }
+        if (mail.getSenderId().equals(userId)) {
+            return;
+        }
+        int updated = receiverMapper.markAsRead(mailId, userId);
+        if (updated == 0) {
+            throw new BusinessException(404, "邮件不存在或无权限");
+        }
+    }
+
+    @Override
+    public void trashMail(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "邮件不存在");
+        }
+        int updated = receiverMapper.softDelete(mailId, userId);
+        if (updated == 0) {
+            throw new BusinessException(404, "邮件不存在或无权限");
+        }
+    }
+
+    @Override
+    public List<MailView> getTrash(Long userId) {
+        return mailMapper.selectTrash(userId);
+    }
+
+    @Override
+    public void restoreMail(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "邮件不存在");
+        }
+        int updated = receiverMapper.restoreMail(mailId, userId);
+        if (updated == 0) {
+            throw new BusinessException(404, "邮件不存在或不在垃圾箱中");
+        }
+    }
+
+    private boolean hasAccess(Long userId, Mail mail) {
+        if (mail.getSenderId().equals(userId)) {
+            return true;
+        }
+        QueryWrapper<Receiver> wrapper = new QueryWrapper<>();
+        wrapper.eq("mail_id", mail.getId()).eq("receiver_id", userId);
+        return receiverMapper.selectCount(wrapper) > 0;
+    }
+
+    private SendResult createMailAndReceivers(Long userId, SendMailRequest request) {
         Set<String> toEmails = request.getTo() == null ? new LinkedHashSet<>() : new LinkedHashSet<>(request.getTo());
         Set<String> ccEmails = request.getCc() == null ? new LinkedHashSet<>() : new LinkedHashSet<>(request.getCc());
         if (toEmails.isEmpty() && ccEmails.isEmpty()) {
@@ -185,42 +270,19 @@ public class MailServiceImpl implements MailService {
         for (Receiver receiver : receivers) {
             receiverMapper.insert(receiver);
         }
-        return mail.getId();
+        Set<Long> receiverIds = receivers.stream()
+                .map(Receiver::getReceiverId)
+                .collect(Collectors.toSet());
+        return new SendResult(mail, receiverIds);
     }
 
-    @Override
-    public void markAsRead(Long userId, Long mailId) {
-        Mail mail = mailMapper.selectById(mailId);
-        if (mail == null) {
-            throw new BusinessException(404, "邮件不存在");
-        }
-        if (mail.getSenderId().equals(userId)) {
-            return;
-        }
-        int updated = receiverMapper.markAsRead(mailId, userId);
-        if (updated == 0) {
-            throw new BusinessException(404, "邮件不存在或无权限");
-        }
-    }
+    private static class SendResult {
+        private final Mail mail;
+        private final Set<Long> receiverIds;
 
-    @Override
-    public void trashMail(Long userId, Long mailId) {
-        Mail mail = mailMapper.selectById(mailId);
-        if (mail == null) {
-            throw new BusinessException(404, "邮件不存在");
+        private SendResult(Mail mail, Set<Long> receiverIds) {
+            this.mail = mail;
+            this.receiverIds = receiverIds;
         }
-        int updated = receiverMapper.softDelete(mailId, userId);
-        if (updated == 0) {
-            throw new BusinessException(404, "邮件不存在或无权限");
-        }
-    }
-
-    private boolean hasAccess(Long userId, Mail mail) {
-        if (mail.getSenderId().equals(userId)) {
-            return true;
-        }
-        QueryWrapper<Receiver> wrapper = new QueryWrapper<>();
-        wrapper.eq("mail_id", mail.getId()).eq("receiver_id", userId);
-        return receiverMapper.selectCount(wrapper) > 0;
     }
 }

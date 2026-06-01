@@ -1,5 +1,7 @@
 package com.osschoolwork.backend.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -11,6 +13,8 @@ import jakarta.validation.ConstraintViolationException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BusinessException.class)
     public ApiResponse<Void> handleBusiness(BusinessException ex) {
@@ -45,6 +49,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ApiResponse<Void> handleOther(Exception ex) {
         // 未捕获异常统一返回 500
+        LOGGER.error("Unhandled exception", ex);
         return ApiResponse.error(500, "Server error");
     }
 }

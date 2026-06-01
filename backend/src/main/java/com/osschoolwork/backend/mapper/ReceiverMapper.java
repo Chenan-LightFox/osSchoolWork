@@ -22,4 +22,11 @@ public interface ReceiverMapper extends BaseMapper<Receiver> {
     @Update("UPDATE receiver SET deleted = 1, folder = 'TRASH' "
             + "WHERE mail_id = #{mailId} AND receiver_id = #{userId}")
     int softDelete(@Param("mailId") Long mailId, @Param("userId") Long userId);
+
+    /**
+     * 恢复：将邮件从垃圾箱移回收件箱（deleted=0, folder='INBOX'）
+     */
+    @Update("UPDATE receiver SET deleted = 0, folder = 'INBOX' "
+            + "WHERE mail_id = #{mailId} AND receiver_id = #{userId}")
+    int restoreMail(@Param("mailId") Long mailId, @Param("userId") Long userId);
 }

@@ -16,3 +16,6 @@ jwt:
   secret: Add-your-secret-key
   expire-minutes: 120
   issuer: osSchoolWork
+
+app:
+  upload-dir: uploads
