@@ -22,4 +22,31 @@ public interface ReceiverMapper extends BaseMapper<Receiver> {
     @Update("UPDATE receiver SET deleted = 1, folder = 'TRASH' "
             + "WHERE mail_id = #{mailId} AND receiver_id = #{userId}")
     int softDelete(@Param("mailId") Long mailId, @Param("userId") Long userId);
+
+    /**
+     * 恢复：将邮件从垃圾箱移回收件箱（deleted=0, folder='INBOX'）
+     */
+    @Update("UPDATE receiver SET deleted = 0, folder = 'INBOX' "
+            + "WHERE mail_id = #{mailId} AND receiver_id = #{userId}")
+    int restoreMail(@Param("mailId") Long mailId, @Param("userId") Long userId);
+
+    /**
+     * 删除某邮件的所有收件关系（用于草稿更新时重建）
+     */
+    @org.apache.ibatis.annotations.Delete("DELETE FROM receiver WHERE mail_id = #{mailId}")
+    int deleteByMailId(@Param("mailId") Long mailId);
+
+    /**
+     * 硬删除：彻底删除用户在垃圾箱中的收件关系
+     */
+    @org.apache.ibatis.annotations.Delete("DELETE FROM receiver "
+            + "WHERE mail_id = #{mailId} AND receiver_id = #{userId} "
+            + "AND deleted = 1 AND folder = 'TRASH'")
+    int hardDelete(@Param("mailId") Long mailId, @Param("userId") Long userId);
+
+    /**
+     * 统计某邮件的剩余收件关系数
+     */
+    @org.apache.ibatis.annotations.Select("SELECT COUNT(*) FROM receiver WHERE mail_id = #{mailId}")
+    int countByMailId(@Param("mailId") Long mailId);
 }

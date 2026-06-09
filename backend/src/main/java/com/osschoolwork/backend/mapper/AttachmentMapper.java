@@ -17,4 +17,10 @@ public interface AttachmentMapper extends BaseMapper<Attachment> {
      */
     @Select("SELECT * FROM attachment WHERE mail_id = #{mailId}")
     List<Attachment> selectByMailId(@Param("mailId") Long mailId);
+
+    /**
+     * 删除某邮件的所有附件（用于邮件清理）
+     */
+    @org.apache.ibatis.annotations.Delete("DELETE FROM attachment WHERE mail_id = #{mailId}")
+    int deleteByMailId(@Param("mailId") Long mailId);
 }
