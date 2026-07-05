@@ -1,7 +1,13 @@
 package com.osschoolwork.backend.controller;
 
-import java.util.List;
-
+import com.osschoolwork.backend.common.ApiResponse;
+import com.osschoolwork.backend.dto.DraftRequest;
+import com.osschoolwork.backend.dto.MailDetailView;
+import com.osschoolwork.backend.dto.MailView;
+import com.osschoolwork.backend.dto.SendMailRequest;
+import com.osschoolwork.backend.service.MailService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -36,6 +42,8 @@ public class MailController {
         this.mailService = mailService;
     }
 
+    // ── 列表查询（字面量路径在 /{mailId} 之前声明，避免路由混淆）────
+
     @GetMapping("/inbox")
     public ApiResponse<List<MailView>> inbox(HttpServletRequest request) {
         Long userId = getUserId(request);
@@ -48,6 +56,18 @@ public class MailController {
         return ApiResponse.success(mailService.getSent(userId));
     }
 
+    @GetMapping("/trash")
+    public ApiResponse<List<MailView>> trash(HttpServletRequest request) {
+        Long userId = getUserId(request);
+        return ApiResponse.success(mailService.getTrash(userId));
+    }
+
+    @GetMapping("/drafts")
+    public ApiResponse<List<MailView>> drafts(HttpServletRequest request) {
+        Long userId = getUserId(request);
+        return ApiResponse.success(mailService.getDrafts(userId));
+    }
+
     @GetMapping("/search")
     public ApiResponse<List<MailView>> search(@RequestParam(value = "q", required = false) String keyword,
                                               HttpServletRequest request) {
@@ -55,11 +75,7 @@ public class MailController {
         return ApiResponse.success(mailService.searchInbox(userId, keyword));
     }
 
-    @GetMapping("/trash")
-    public ApiResponse<List<MailView>> trash(HttpServletRequest request) {
-        Long userId = getUserId(request);
-        return ApiResponse.success(mailService.getTrash(userId));
-    }
+    // ── 详情 ────────────────────────────────────────────────────
 
     @GetMapping("/{mailId}")
     public ApiResponse<MailDetailView> detail(@PathVariable Long mailId,
@@ -68,21 +84,42 @@ public class MailController {
         return ApiResponse.success(mailService.getMailDetail(userId, mailId));
     }
 
-    @PostMapping(value = "/send", consumes = MediaType.APPLICATION_JSON_VALUE)
+    // ── 发送 ────────────────────────────────────────────────────
+
+    @PostMapping("/send")
     public ApiResponse<Long> send(@Valid @RequestBody SendMailRequest request,
                                   HttpServletRequest httpRequest) {
         Long userId = getUserId(httpRequest);
         return ApiResponse.success(mailService.sendMail(userId, request));
     }
 
-    @PostMapping(value = "/send", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<Long> sendWithAttachments(@Valid @RequestPart("payload") SendMailRequest request,
-                                                 @RequestPart(value = "files", required = false)
-                                                 List<MultipartFile> files,
-                                                 HttpServletRequest httpRequest) {
+    // ── 草稿 ────────────────────────────────────────────────────
+
+    @PostMapping("/draft")
+    public ApiResponse<Long> saveDraft(@RequestBody DraftRequest request,
+                                       HttpServletRequest httpRequest) {
         Long userId = getUserId(httpRequest);
-        return ApiResponse.success(mailService.sendMailWithAttachments(userId, request, files));
+        return ApiResponse.success(mailService.saveDraft(userId, request));
     }
+
+    @PutMapping("/{mailId}")
+    public ApiResponse<Void> updateDraft(@PathVariable Long mailId,
+                                         @RequestBody DraftRequest request,
+                                         HttpServletRequest httpRequest) {
+        Long userId = getUserId(httpRequest);
+        mailService.updateDraft(userId, mailId, request);
+        return ApiResponse.success(null);
+    }
+
+    @PostMapping("/{mailId}/send")
+    public ApiResponse<Void> sendDraft(@PathVariable Long mailId,
+                                       HttpServletRequest httpRequest) {
+        Long userId = getUserId(httpRequest);
+        mailService.sendDraft(userId, mailId);
+        return ApiResponse.success(null);
+    }
+
+    // ── 状态变更 ────────────────────────────────────────────────
 
     @PostMapping("/{mailId}/read")
     public ApiResponse<Void> markRead(@PathVariable Long mailId,
@@ -107,6 +144,16 @@ public class MailController {
         mailService.restoreMail(userId, mailId);
         return ApiResponse.success(null);
     }
+
+    @DeleteMapping("/{mailId}/permanent")
+    public ApiResponse<Void> permanentDelete(@PathVariable Long mailId,
+                                             HttpServletRequest request) {
+        Long userId = getUserId(request);
+        mailService.permanentDelete(userId, mailId);
+        return ApiResponse.success(null);
+    }
+
+    // ── 工具 ────────────────────────────────────────────────────
 
     private Long getUserId(HttpServletRequest request) {
         Object value = request.getAttribute("userId");

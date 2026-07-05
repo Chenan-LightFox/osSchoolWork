@@ -1,13 +1,15 @@
 package com.osschoolwork.backend.controller;
 
-import java.nio.charset.StandardCharsets;
-
+import com.osschoolwork.backend.common.ApiResponse;
+import com.osschoolwork.backend.entity.Attachment;
+import com.osschoolwork.backend.service.AttachmentService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.io.Resource;
-import org.springframework.http.ContentDisposition;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,13 +18,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.osschoolwork.backend.common.ApiResponse;
-import com.osschoolwork.backend.dto.AttachmentUploadResponse;
-import com.osschoolwork.backend.exception.BusinessException;
-import com.osschoolwork.backend.service.AttachmentDownload;
-import com.osschoolwork.backend.service.AttachmentService;
-
-import jakarta.servlet.http.HttpServletRequest;
+import java.io.InputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/attachment")
@@ -35,40 +34,60 @@ public class AttachmentController {
         this.attachmentService = attachmentService;
     }
 
-    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ApiResponse<AttachmentUploadResponse> upload(@RequestParam("mailId") Long mailId,
-                                                        @RequestParam("file") MultipartFile file,
-                                                        HttpServletRequest request) {
+    /**
+     * 上传附件并绑定到指定邮件
+     */
+    @PostMapping("/upload")
+    public ApiResponse<Attachment> upload(@RequestParam("mailId") Long mailId,
+                                          @RequestParam("file") MultipartFile file,
+                                          HttpServletRequest request) {
         Long userId = getUserId(request);
         return ApiResponse.success(attachmentService.upload(userId, mailId, file));
     }
 
-    @GetMapping("/download/{id}")
-    public ResponseEntity<Resource> download(@PathVariable("id") Long attachmentId,
-                                             HttpServletRequest request) {
+    /**
+     * 下载附件
+     */
+    @GetMapping("/download/{attachmentId}")
+    public ResponseEntity<InputStreamResource> download(@PathVariable Long attachmentId,
+                                                        HttpServletRequest request) {
         Long userId = getUserId(request);
-        AttachmentDownload download = attachmentService.resolveDownload(userId, attachmentId);
+        Attachment attachment = attachmentService.getForDownload(userId, attachmentId);
+        InputStream stream = attachmentService.getFileStream(attachment);
 
-        String contentType = download.getContentType();
-        if (contentType == null || contentType.isBlank()) {
-            contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
-        }
-
-        ContentDisposition disposition = ContentDisposition.attachment()
-                .filename(download.getAttachment().getFileName(), StandardCharsets.UTF_8)
-                .build();
+        String encodedName = URLEncoder.encode(attachment.getFileName(), StandardCharsets.UTF_8)
+                .replace("+", "%20");
 
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .contentLength(download.getAttachment().getFileSize())
-                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .body(download.getResource());
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + encodedName + "\"")
+                .body(new InputStreamResource(stream));
+    }
+
+    /**
+     * 删除单个附件
+     */
+    @DeleteMapping("/{attachmentId}")
+    public ApiResponse<Void> deleteAttachment(@PathVariable Long attachmentId,
+                                              HttpServletRequest request) {
+        Long userId = getUserId(request);
+        attachmentService.deleteAttachment(userId, attachmentId);
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 列出某邮件的所有附件
+     */
+    @GetMapping("/list/{mailId}")
+    public ApiResponse<List<Attachment>> listByMail(@PathVariable Long mailId) {
+        return ApiResponse.success(attachmentService.listByMailId(mailId));
     }
 
     private Long getUserId(HttpServletRequest request) {
         Object value = request.getAttribute("userId");
         if (value == null) {
-            throw new BusinessException(401, "Unauthorized");
+            throw new com.osschoolwork.backend.exception.BusinessException(401, "Unauthorized");
         }
         return (Long) value;
     }

@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.osschoolwork.backend.dto.DraftRequest;
 import com.osschoolwork.backend.dto.MailDetailView;
 import com.osschoolwork.backend.dto.MailView;
 import com.osschoolwork.backend.dto.SendMailRequest;
@@ -56,6 +57,10 @@ public class MailServiceImpl implements MailService {
         this.attachmentService = attachmentService;
     }
 
+    // ---------------------------------------------------------------
+    // 查询
+    // ---------------------------------------------------------------
+
     @Override
     public List<MailView> getInbox(Long userId) {
         return mailMapper.selectInbox(userId);
@@ -64,6 +69,16 @@ public class MailServiceImpl implements MailService {
     @Override
     public List<MailView> getSent(Long userId) {
         return mailMapper.selectSent(userId);
+    }
+
+    @Override
+    public List<MailView> getTrash(Long userId) {
+        return mailMapper.selectTrash(userId);
+    }
+
+    @Override
+    public List<MailView> getDrafts(Long userId) {
+        return mailMapper.selectDrafts(userId);
     }
 
     @Override
@@ -94,7 +109,8 @@ public class MailServiceImpl implements MailService {
             detail.setSenderEmail(sender.getEmail());
         }
 
-        List<Receiver> receiverList = receiverMapper.selectList(new QueryWrapper<Receiver>().eq("mail_id", mailId));
+        List<Receiver> receiverList = receiverMapper.selectList(
+                new QueryWrapper<Receiver>().eq("mail_id", mailId));
         Set<Long> receiverIds = receiverList.stream()
                 .map(Receiver::getReceiverId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -124,29 +140,21 @@ public class MailServiceImpl implements MailService {
         return detail;
     }
 
-    @Transactional
-    @Override
-    public Long sendMail(Long userId, SendMailRequest request) {
-        SendResult result = createMailAndReceivers(userId, request);
-        webSocketNotifier.notifyNewMail(result.receiverIds, result.mail.getId(), userId, result.mail.getSubject());
-        return result.mail.getId();
-    }
+    // ---------------------------------------------------------------
+    // 发送
+    // ---------------------------------------------------------------
 
     @Transactional
     @Override
-    public Long sendMailWithAttachments(Long userId, SendMailRequest request, List<MultipartFile> files) {
-        SendResult result = createMailAndReceivers(userId, request);
-        if (files != null) {
-            for (MultipartFile file : files) {
-                if (file == null || file.isEmpty()) {
-                    continue;
-                }
-                attachmentService.upload(userId, result.mail.getId(), file);
-            }
-        }
-        webSocketNotifier.notifyNewMail(result.receiverIds, result.mail.getId(), userId, result.mail.getSubject());
-        return result.mail.getId();
+    public Long sendMail(Long userId, SendMailRequest request) {
+        Mail mail = createMail(userId, request.getSubject(), request.getContent(), "SENT");
+        createReceivers(mail.getId(), request.getTo(), request.getCc());
+        return mail.getId();
     }
+
+    // ---------------------------------------------------------------
+    // 状态变更
+    // ---------------------------------------------------------------
 
     @Override
     public void markAsRead(Long userId, Long mailId) {
@@ -176,11 +184,6 @@ public class MailServiceImpl implements MailService {
     }
 
     @Override
-    public List<MailView> getTrash(Long userId) {
-        return mailMapper.selectTrash(userId);
-    }
-
-    @Override
     public void restoreMail(Long userId, Long mailId) {
         Mail mail = mailMapper.selectById(mailId);
         if (mail == null) {
@@ -188,28 +191,131 @@ public class MailServiceImpl implements MailService {
         }
         int updated = receiverMapper.restoreMail(mailId, userId);
         if (updated == 0) {
-            throw new BusinessException(404, "邮件不存在或不在垃圾箱中");
+            throw new BusinessException(404, "邮件不在垃圾箱中");
         }
     }
 
-    private boolean hasAccess(Long userId, Mail mail) {
-        if (mail.getSenderId().equals(userId)) {
-            return true;
+    @Transactional
+    @Override
+    public void permanentDelete(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "邮件不存在");
         }
+
+        // 硬删除当前用户在垃圾箱中的收件关系
+        int deleted = receiverMapper.hardDelete(mailId, userId);
+        if (deleted == 0) {
+            throw new BusinessException(404, "邮件不在垃圾箱中");
+        }
+
+        // 若该邮件已无任何收件关系，清理附件与邮件本身
+        int remaining = receiverMapper.countByMailId(mailId);
+        if (remaining == 0) {
+            attachmentMapper.deleteByMailId(mailId);
+            mailMapper.deleteById(mailId);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // 草稿
+    // ---------------------------------------------------------------
+
+    @Transactional
+    @Override
+    public Long saveDraft(Long userId, DraftRequest request) {
+        String subject = request.getSubject() == null ? "" : request.getSubject().trim();
+        String content = request.getContent() == null ? "" : request.getContent();
+        Mail mail = createMail(userId, subject, content, "DRAFT");
+        createReceivers(mail.getId(), request.getTo(), request.getCc());
+        return mail.getId();
+    }
+
+    @Transactional
+    @Override
+    public void updateDraft(Long userId, Long mailId, DraftRequest request) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "草稿不存在");
+        }
+        if (!mail.getSenderId().equals(userId)) {
+            throw new BusinessException(403, "无权修改该草稿");
+        }
+        if (!"DRAFT".equals(mail.getStatus())) {
+            throw new BusinessException(400, "只能修改草稿状态下的邮件");
+        }
+
+        // 更新草稿字段
+        mail.setSubject(request.getSubject() == null ? "" : request.getSubject().trim());
+        mail.setContent(request.getContent() == null ? "" : request.getContent());
+        mail.setSendTime(LocalDateTime.now());
+        mailMapper.updateById(mail);
+
+        // 重建收件关系
+        if (request.getTo() != null || request.getCc() != null) {
+            receiverMapper.deleteByMailId(mailId);
+            createReceivers(mailId, request.getTo(), request.getCc());
+        }
+    }
+
+    @Transactional
+    @Override
+    public void sendDraft(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "草稿不存在");
+        }
+        if (!mail.getSenderId().equals(userId)) {
+            throw new BusinessException(403, "无权发送该草稿");
+        }
+        if (!"DRAFT".equals(mail.getStatus())) {
+            throw new BusinessException(400, "该邮件不是草稿状态");
+        }
+
+        // 检查至少有一个收件人
         QueryWrapper<Receiver> wrapper = new QueryWrapper<>();
-        wrapper.eq("mail_id", mail.getId()).eq("receiver_id", userId);
-        return receiverMapper.selectCount(wrapper) > 0;
-    }
-
-    private SendResult createMailAndReceivers(Long userId, SendMailRequest request) {
-        Set<String> toEmails = request.getTo() == null ? new LinkedHashSet<>() : new LinkedHashSet<>(request.getTo());
-        Set<String> ccEmails = request.getCc() == null ? new LinkedHashSet<>() : new LinkedHashSet<>(request.getCc());
-        if (toEmails.isEmpty() && ccEmails.isEmpty()) {
+        wrapper.eq("mail_id", mailId);
+        long receiverCount = receiverMapper.selectCount(wrapper);
+        if (receiverCount == 0) {
             throw new BusinessException(400, "请至少填写一个收件人");
         }
 
-        Set<String> allEmails = new LinkedHashSet<>(toEmails);
-        allEmails.addAll(ccEmails);
+        mail.setStatus("SENT");
+        mail.setSendTime(LocalDateTime.now());
+        mailMapper.updateById(mail);
+    }
+
+    // ---------------------------------------------------------------
+    // 内部工具方法
+    // ---------------------------------------------------------------
+
+    /**
+     * 创建邮件记录并插入数据库
+     */
+    private Mail createMail(Long userId, String subject, String content, String status) {
+        Mail mail = new Mail();
+        mail.setSenderId(userId);
+        mail.setSubject(subject);
+        mail.setContent(content);
+        mail.setStatus(status);
+        mail.setSendTime(LocalDateTime.now());
+        mailMapper.insert(mail);
+        return mail;
+    }
+
+    /**
+     * 根据邮箱列表创建收件关系（不校验——调用方自行保证合法性）
+     */
+    private void createReceivers(Long mailId, List<String> toEmails, List<String> ccEmails) {
+        Set<String> toSet = toEmails == null ? new LinkedHashSet<>() : new LinkedHashSet<>(toEmails);
+        Set<String> ccSet = ccEmails == null ? new LinkedHashSet<>() : new LinkedHashSet<>(ccEmails);
+        if (toSet.isEmpty() && ccSet.isEmpty()) {
+            return;
+        }
+
+        Set<String> allEmails = new LinkedHashSet<>(toSet);
+        allEmails.addAll(ccSet);
+
         QueryWrapper<User> userQuery = new QueryWrapper<>();
         userQuery.in("email", allEmails);
         List<User> users = userMapper.selectList(userQuery);
@@ -227,58 +333,35 @@ public class MailServiceImpl implements MailService {
         Map<String, User> userByEmail = users.stream()
                 .collect(Collectors.toMap(User::getEmail, Function.identity()));
 
-        Mail mail = new Mail();
-        mail.setSenderId(userId);
-        mail.setSubject(request.getSubject());
-        mail.setContent(request.getContent());
-        mail.setStatus("SENT");
-        mail.setSendTime(LocalDateTime.now());
-        mailMapper.insert(mail);
-
         List<Receiver> receivers = new ArrayList<>();
-        for (String email : toEmails) {
+
+        for (String email : toSet) {
             User receiverUser = userByEmail.get(email);
-            if (receiverUser == null) {
-                continue;
-            }
-            Receiver receiver = new Receiver();
-            receiver.setMailId(mail.getId());
-            receiver.setReceiverId(receiverUser.getId());
-            receiver.setReceiverType("TO");
-            receiver.setIsRead(0);
-            receiver.setDeleted(0);
-            receiver.setFolder("INBOX");
-            receivers.add(receiver);
+            if (receiverUser == null) continue;
+            receivers.add(buildReceiver(mailId, receiverUser.getId(), "TO"));
         }
-        for (String email : ccEmails) {
-            if (toEmails.contains(email)) {
-                continue;
-            }
+        for (String email : ccSet) {
+            if (toSet.contains(email)) continue;
             User receiverUser = userByEmail.get(email);
-            if (receiverUser == null) {
-                continue;
-            }
-            Receiver receiver = new Receiver();
-            receiver.setMailId(mail.getId());
-            receiver.setReceiverId(receiverUser.getId());
-            receiver.setReceiverType("CC");
-            receiver.setIsRead(0);
-            receiver.setDeleted(0);
-            receiver.setFolder("INBOX");
-            receivers.add(receiver);
+            if (receiverUser == null) continue;
+            receivers.add(buildReceiver(mailId, receiverUser.getId(), "CC"));
         }
+
         for (Receiver receiver : receivers) {
             receiverMapper.insert(receiver);
         }
-        Set<Long> receiverIds = receivers.stream()
-                .map(Receiver::getReceiverId)
-                .collect(Collectors.toSet());
-        return new SendResult(mail, receiverIds);
     }
 
-    private static class SendResult {
-        private final Mail mail;
-        private final Set<Long> receiverIds;
+    private Receiver buildReceiver(Long mailId, Long receiverId, String type) {
+        Receiver receiver = new Receiver();
+        receiver.setMailId(mailId);
+        receiver.setReceiverId(receiverId);
+        receiver.setReceiverType(type);
+        receiver.setIsRead(0);
+        receiver.setDeleted(0);
+        receiver.setFolder("INBOX");
+        return receiver;
+    }
 
         private SendResult(Mail mail, Set<Long> receiverIds) {
             this.mail = mail;
