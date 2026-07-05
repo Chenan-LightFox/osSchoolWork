@@ -105,7 +105,7 @@ const goLogin = () => {
         
         <div style="text-align: center; font-size: 14px; color: #606266; margin-top: 16px;">
           <span>已有账号？</span>
-          <el-button type="link" @click="goLogin" style="padding: 0; color: #409EFF;">去登录</el-button>
+          <el-button type="link" @click="goLogin" style="padding: 0; color: #409EFF; border: none;">去登录</el-button>
         </div>
       </el-form>
     </el-card>
