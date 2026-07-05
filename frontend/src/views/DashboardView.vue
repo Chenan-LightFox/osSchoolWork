@@ -1,6 +1,6 @@
 <script setup>
-import { computed, reactive, ref, watch, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ElMessage, ElNotification } from 'element-plus'
 import { currentUser, isAuthenticated } from '@/stores/auth'
 import { Edit, Search, Delete, User, Timer } from '@element-plus/icons-vue'
 import {
@@ -26,6 +26,7 @@ const loadingMails = ref(false)
 const loadingDetail = ref(false)
 const loadingSend = ref(false)
 const composeDrawer = ref(false)
+const socketRef = ref(null)
 
 const composeForm = reactive({
   subject: '',
@@ -126,6 +127,54 @@ const handleTrash = async (mail) => {
     }
   } catch (error) {
     ElMessage.error(error.message || '删除失败')
+  }
+}
+
+const handleSocketMessage = async (event) => {
+  let payload = null
+  try {
+    payload = JSON.parse(event.data)
+  } catch {
+    return
+  }
+  if (payload?.type !== 'NEW_MAIL') {
+    return
+  }
+  ElNotification({
+    title: '新邮件提醒',
+    message: payload.subject || '你收到一封新邮件',
+    type: 'success',
+  })
+  if (activeTab.value === 'inbox') {
+    await loadMails()
+  }
+}
+
+const connectSocket = () => {
+  if (!isAuthenticated.value) {
+    return
+  }
+  if (socketRef.value && socketRef.value.readyState <= 1) {
+    return
+  }
+  const socket = createMailSocket()
+  if (!socket) {
+    return
+  }
+  socket.onmessage = handleSocketMessage
+  socket.onclose = () => {
+    socketRef.value = null
+  }
+  socket.onerror = () => {
+    socketRef.value = null
+  }
+  socketRef.value = socket
+}
+
+const closeSocket = () => {
+  if (socketRef.value) {
+    socketRef.value.close()
+    socketRef.value = null
   }
 }
 

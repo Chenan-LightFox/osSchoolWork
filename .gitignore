@@ -1,6 +1,8 @@
 backend/target/
 *.log
 .vscode/
+.claude/
+CLAUDE.md
 backend/src/main/resources/application.yml
 
 WEEK*_REPORT.md

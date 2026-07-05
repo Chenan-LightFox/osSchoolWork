@@ -5,8 +5,6 @@ import com.osschoolwork.backend.dto.MailDetailView;
 import com.osschoolwork.backend.dto.MailView;
 import com.osschoolwork.backend.dto.SendMailRequest;
 
-import java.util.List;
-
 public interface MailService {
 
     List<MailView> getInbox(Long userId);
@@ -22,6 +20,8 @@ public interface MailService {
     MailDetailView getMailDetail(Long userId, Long mailId);
 
     Long sendMail(Long userId, SendMailRequest request);
+
+    Long sendMailWithAttachments(Long userId, SendMailRequest request, List<MultipartFile> files);
 
     void markAsRead(Long userId, Long mailId);
 

@@ -1,5 +1,19 @@
 package com.osschoolwork.backend.service.impl;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.osschoolwork.backend.dto.DraftRequest;
 import com.osschoolwork.backend.dto.MailDetailView;
@@ -14,19 +28,9 @@ import com.osschoolwork.backend.mapper.AttachmentMapper;
 import com.osschoolwork.backend.mapper.MailMapper;
 import com.osschoolwork.backend.mapper.ReceiverMapper;
 import com.osschoolwork.backend.mapper.UserMapper;
+import com.osschoolwork.backend.service.AttachmentService;
 import com.osschoolwork.backend.service.MailService;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import com.osschoolwork.backend.websocket.WebSocketNotifier;
 
 @Service
 public class MailServiceImpl implements MailService {
@@ -35,16 +39,22 @@ public class MailServiceImpl implements MailService {
     private final ReceiverMapper receiverMapper;
     private final AttachmentMapper attachmentMapper;
     private final UserMapper userMapper;
+    private final WebSocketNotifier webSocketNotifier;
+    private final AttachmentService attachmentService;
 
     @Autowired
     public MailServiceImpl(MailMapper mailMapper,
                            ReceiverMapper receiverMapper,
                            AttachmentMapper attachmentMapper,
-                           UserMapper userMapper) {
+                           UserMapper userMapper,
+                           WebSocketNotifier webSocketNotifier,
+                           AttachmentService attachmentService) {
         this.mailMapper = mailMapper;
         this.receiverMapper = receiverMapper;
         this.attachmentMapper = attachmentMapper;
         this.userMapper = userMapper;
+        this.webSocketNotifier = webSocketNotifier;
+        this.attachmentService = attachmentService;
     }
 
     // ---------------------------------------------------------------
@@ -353,12 +363,9 @@ public class MailServiceImpl implements MailService {
         return receiver;
     }
 
-    private boolean hasAccess(Long userId, Mail mail) {
-        if (mail.getSenderId().equals(userId)) {
-            return true;
+        private SendResult(Mail mail, Set<Long> receiverIds) {
+            this.mail = mail;
+            this.receiverIds = receiverIds;
         }
-        QueryWrapper<Receiver> wrapper = new QueryWrapper<>();
-        wrapper.eq("mail_id", mail.getId()).eq("receiver_id", userId);
-        return receiverMapper.selectCount(wrapper) > 0;
     }
 }
