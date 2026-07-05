@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElNotification } from 'element-plus'
 import { currentUser, isAuthenticated } from '@/stores/auth'
-import { Edit, Search, Delete, User, Timer } from '@element-plus/icons-vue'
+import { createMailSocket } from '@/services/ws'
 import {
   getInbox,
   getSent,
@@ -179,395 +179,216 @@ const closeSocket = () => {
 }
 
 watch(activeTab, loadMails)
-onMounted(loadMails)
+watch(isAuthenticated, (authed) => {
+  if (authed) {
+    connectSocket()
+  } else {
+    closeSocket()
+  }
+})
+
+onMounted(() => {
+  loadMails()
+  connectSocket()
+})
+
+onBeforeUnmount(closeSocket)
 </script>
 
 <template>
-  <div class="dashboard-container">
-    <div class="dashboard-layout">
-      
-      <div class="dashboard-sidebar">
-        <el-card shadow="always" class="user-profile-card">
-          <div class="user-avatar-wrap">
-            <el-avatar :size="64" :icon="User" class="custom-avatar" />
-            <h3 class="username-display">{{ user.username || '未知用户' }}</h3>
-            <span class="user-email-tag">{{ user.email || '-' }}</span>
-          </div>
-          <div class="user-meta-info">
-            <div class="meta-item"><strong>用户账户 ID:</strong> {{ user.id || '-' }}</div>
-          </div>
-        </el-card>
+  <div class="dashboard-layout">
+    <div class="dashboard-sidebar">
+      <el-card shadow="hover" class="dashboard-card">
+        <template #header>
+          <div>用户信息</div>
+        </template>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="用户ID">{{ user.id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="邮箱">{{ user.email || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="用户名">{{ user.username || '-' }}</el-descriptions-item>
+        </el-descriptions>
+      </el-card>
 
-        <div class="action-box">
-          <el-button type="primary" size="large" @click="openCompose" :icon="Edit" class="write-btn">
-            撰写新邮件
-          </el-button>
+      <el-card shadow="hover" class="dashboard-card" style="margin-top: 24px">
+        <template #header>
+          <div>邮件操作</div>
+        </template>
+        <div class="toolbar-actions">
+          <el-button type="primary" @click="openCompose" icon="el-icon-edit">写邮件</el-button>
         </div>
-      </div>
+        <el-alert
+          type="info"
+          show-icon
+          :closable="false"
+          title="当前页面已接入收件箱、发件箱和邮件详情接口。"
+        />
+      </el-card>
+    </div>
 
-      <div class="dashboard-content">
-        <el-card shadow="always" class="main-content-card">
-          <div class="mail-toolbar">
-            <el-radio-group v-model="activeTab" size="large" class="custom-tabs">
-              <el-radio-button label="inbox">📥 收件箱</el-radio-button>
-              <el-radio-button label="sent">📤 已发送</el-radio-button>
-            </el-radio-group>
-            
-            <div class="mail-search" v-if="activeTab === 'inbox'">
-              <el-input
-                v-model="searchKeyword"
-                placeholder="按主题/发件人全局搜索..."
-                clearable
-                @clear="handleSearch"
-                @keyup.enter="handleSearch"
-                style="max-width: 360px;"
-              >
-                <template #append>
-                  <el-button :icon="Search" @click="handleSearch" />
+    <div class="dashboard-content">
+      <el-card shadow="hover" class="dashboard-card">
+        <template #header>
+          <div>邮件中心</div>
+        </template>
+
+        <div class="mail-toolbar">
+          <el-tabs v-model="activeTab" type="border-card">
+            <el-tab-pane v-for="tab in tabs" :key="tab.key" :label="tab.label" :name="tab.key" />
+          </el-tabs>
+          <div class="mail-search" v-if="activeTab === 'inbox'">
+            <el-input
+              v-model="searchKeyword"
+              placeholder="按主题/发件人搜索"
+              clearable
+              @clear="handleSearch"
+              @keyup.enter.native="handleSearch"
+            >
+              <template #append>
+                <el-button type="primary" @click="handleSearch">搜索</el-button>
+              </template>
+            </el-input>
+          </div>
+        </div>
+
+        <div class="mail-body">
+          <div class="mail-list">
+            <el-table
+              :data="mails"
+              v-loading="loadingMails"
+              style="width: 100%"
+              height="560"
+              @row-click="openMail"
+            >
+              <el-table-column prop="senderName" label="发件人" width="140" />
+              <el-table-column prop="subject" label="主题" />
+              <el-table-column prop="sendTime" label="发送时间" width="200" />
+              <el-table-column
+                label="状态"
+                width="120"
+                :formatter="(row) => row.isRead === 1 ? '已读' : '未读'"
+              />
+              <el-table-column label="操作" width="120">
+                <template #default="{ row }">
+                  <el-button size="small" type="danger" @click.stop="handleTrash(row)">移除</el-button>
                 </template>
-              </el-input>
-            </div>
+              </el-table-column>
+            </el-table>
           </div>
 
-          <div class="mail-body-grid">
-            <div class="mail-list-panel">
-              <el-table
-                :data="mails"
-                v-loading="loadingMails"
-                style="width: 100%"
-                height="580"
-                highlight-current-row
-                @row-click="openMail"
-                class="custom-mail-table"
-              >
-                <el-table-column label="状态" width="85" align="center">
-                  <template #default="{ row }">
-                    <el-tag :type="row.isRead === 1 ? 'info' : 'danger'" effect="light" round size="small">
-                      {{ row.isRead === 1 ? '已读' : '未读' }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                
-                <el-table-column prop="senderName" label="发信人" width="130" show-overflow-tooltip>
-                  <template #default="{ row }">
-                    <span :class="{ 'unread-bold': row.isRead !== 1 }">{{ row.senderName }}</span>
-                  </template>
-                </el-table-column>
-
-                <el-table-column prop="subject" label="邮件主题" show-overflow-tooltip>
-                  <template #default="{ row }">
-                    <span :class="{ 'unread-bold': row.isRead !== 1 }">{{ row.subject }}</span>
-                  </template>
-                </el-table-column>
-
-                <el-table-column prop="sendTime" label="时间" width="160" show-overflow-tooltip />
-
-                <el-table-column label="动作" width="85" align="center">
-                  <template #default="{ row }">
-                    <el-button size="small" type="danger" plain :icon="Delete" circle @click.stop="handleTrash(row)" />
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-
-            <div class="mail-detail-panel">
-              <el-card shadow="never" class="detail-inner-card" v-loading="loadingDetail">
-                <div v-if="selectedMail" class="detail-view">
-                  <div class="detail-header">
-                    <h2 class="mail-subject-title">{{ selectedMail.subject }}</h2>
-                    <div class="sender-info-block">
-                      <el-avatar :size="36" :icon="User" style="background-color: #e4e7ed; color: #409eff" />
-                      <div class="sender-meta">
-                        <span class="sender-name"><strong>{{ selectedMail.senderName }}</strong></span>
-                        <span class="sender-email">&lt;{{ selectedMail.senderEmail }}&gt;</span>
-                      </div>
+          <div class="mail-detail">
+            <el-card shadow="hover" style="height: 100%">
+              <template #header>
+                <div>邮件详情</div>
+              </template>
+              <div v-if="selectedMail">
+                <el-descriptions :column="1" border>
+                  <el-descriptions-item label="主题">{{ selectedMail.subject }}</el-descriptions-item>
+                  <el-descriptions-item label="发件人">{{ selectedMail.senderName }} &lt;{{ selectedMail.senderEmail }}&gt;</el-descriptions-item>
+                  <el-descriptions-item label="发送时间">{{ selectedMail.sendTime }}</el-descriptions-item>
+                  <el-descriptions-item label="正文">{{ selectedMail.content }}</el-descriptions-item>
+                  <el-descriptions-item label="收件人">
+                    <div v-for="receiver in selectedMail.receivers" :key="receiver.userId">
+                      {{ receiver.type }}: {{ receiver.username || receiver.email }}
                     </div>
-                    <div class="time-stamp-line">
-                      <el-icon><Timer /></el-icon> <span>{{ selectedMail.sendTime }}</span>
+                  </el-descriptions-item>
+                  <el-descriptions-item label="附件" v-if="selectedMail.attachments?.length">
+                    <div v-for="attachment in selectedMail.attachments" :key="attachment.id">
+                      {{ attachment.fileName }} ({{ attachment.fileSize }} 字节)
                     </div>
-                  </div>
-                  
-                  <el-divider style="margin: 16px 0;" />
-                  
-                  <div class="detail-recipients">
-                    <span class="recipients-label">收件关系：</span>
-                    <el-tag v-for="receiver in selectedMail.receivers" :key="receiver.userId" size="small" type="warning" effect="plain" class="mx-1">
-                      {{ receiver.type === 'to' ? '收件' : '抄送' }}: {{ receiver.username || receiver.email }}
-                    </el-tag>
-                  </div>
-
-                  <div class="mail-content-display">
-                    {{ selectedMail.content }}
-                  </div>
-
-                  <div v-if="selectedMail.attachments?.length" class="attachments-section">
-                    <div class="attach-title">📎 随信附件 ({{ selectedMail.attachments.length }})</div>
-                    <div v-for="file in selectedMail.attachments" :key="file.id" class="file-item-badge">
-                      <span class="file-name">{{ file.fileName }}</span>
-                      <span class="file-size">({{ (file.fileSize / 1024).toFixed(1) }} KB)</span>
-                    </div>
-                  </div>
-                </div>
-                <div v-else class="detail-empty-placeholder">
-                  <el-empty :image-size="120" description="点击左侧列表中的行，即可在此查阅详细信件正文" />
-                </div>
-              </el-card>
-            </div>
+                  </el-descriptions-item>
+                </el-descriptions>
+              </div>
+              <div v-else class="empty-state">
+                <el-empty description="请选择一封邮件查看详情" />
+              </div>
+            </el-card>
           </div>
-        </el-card>
-      </div>
+        </div>
+      </el-card>
     </div>
   </div>
 
   <el-drawer
-    title="新建邮件正文撰写"
-    v-model="composeDrawer"
+    title="写邮件"
+    :model-value="composeDrawer"
     direction="rtl"
-    size="35%"
+    size="40%"
     :destroy-on-close="true"
   >
-    <el-form label-position="top" :model="composeForm">
-      <el-form-item label="🚀 收件人账号 (多个用英文逗号 , 隔开)">
-        <el-input v-model="composeForm.to" placeholder="example@mail.com" />
+    <el-form label-position="top">
+      <el-form-item label="收件人 (逗号分隔)">
+        <el-input v-model="composeForm.to" placeholder="输入收件人邮箱，多个请用逗号分隔" />
       </el-form-item>
-      <el-form-item label="👥 抄送人 (可选)">
-        <el-input v-model="composeForm.cc" placeholder="cc@mail.com" />
+      <el-form-item label="抄送 (逗号分隔)">
+        <el-input v-model="composeForm.cc" placeholder="输入抄送人邮箱，多个请用逗号分隔" />
       </el-form-item>
-      <el-form-item label="📝 邮件核心主题">
-        <el-input v-model="composeForm.subject" placeholder="请输入这封邮件的主题..." />
+      <el-form-item label="主题">
+        <el-input v-model="composeForm.subject" placeholder="请输入主题" />
       </el-form-item>
-      <el-form-item label="✉️ 邮件正文叙述">
-        <el-input type="textarea" v-model="composeForm.content" :rows="12" placeholder="在此编辑您的邮件正文细节内容..." />
+      <el-form-item label="正文">
+        <el-input type="textarea" v-model="composeForm.content" :rows="8" placeholder="请输入邮件正文" />
       </el-form-item>
-      <div class="drawer-footer-actions">
-        <el-button type="primary" size="large" :loading="loadingSend" @click="handleSend" style="width: 130px;">
-          发送邮件
-        </el-button>
-        <el-button size="large" @click="composeDrawer = false">取消</el-button>
-      </div>
+      <el-form-item>
+        <el-button type="primary" :loading="loadingSend" @click="handleSend">发送</el-button>
+        <el-button @click="composeDrawer = false">取消</el-button>
+      </el-form-item>
     </el-form>
   </el-drawer>
 </template>
 
 <style scoped>
-.dashboard-container {
-  padding: 24px;
-  background-color: #f5f7fa;
-  min-height: calc(100vh - 48px);
-}
-
 .dashboard-layout {
   display: flex;
   gap: 24px;
-  max-width: 1600px;
-  margin: 0 auto;
 }
 
 .dashboard-sidebar {
   width: 320px;
-  flex-shrink: 0;
-}
-
-.user-profile-card {
-  text-align: center;
-  border-radius: 8px;
-}
-
-.user-avatar-wrap {
-  padding: 12px 0;
-}
-
-.custom-avatar {
-  background-color: #409eff;
-  box-shadow: 0 4px 12px rgba(64, 159, 255, 0.3);
-}
-
-.username-display {
-  margin: 12px 0 4px 0;
-  color: #303133;
-}
-
-.user-email-tag {
-  font-size: 13px;
-  color: #909399;
-}
-
-.user-meta-info {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid #f2f6fc;
-  text-align: left;
-  font-size: 14px;
-  color: #606266;
-}
-
-.action-box {
-  margin: 20px 0;
-}
-
-.write-btn {
-  width: 100%;
-  height: 44px;
-  font-weight: bold;
-  letter-spacing: 1px;
-  box-shadow: 0 4px 10px rgba(64, 159, 255, 0.2);
+  display: flex;
+  flex-direction: column;
 }
 
 .dashboard-content {
   flex: 1;
-  min-width: 0;
 }
 
-.main-content-card {
-  border-radius: 8px;
+.dashboard-card {
+  padding: 16px;
+}
+
+.toolbar-actions {
+  margin-bottom: 16px;
 }
 
 .mail-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #f2f6fc;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
-.mail-body-grid {
+.mail-search {
+  flex: 1;
+}
+
+.mail-body {
   display: grid;
-  grid-template-columns: 1.3fr 1fr;
-  gap: 20px;
+  grid-template-columns: 2fr 1.5fr;
+  gap: 16px;
 }
 
-.custom-mail-table {
-  border-radius: 6px;
-  overflow: hidden;
+.mail-list {
+  min-height: 620px;
 }
 
-.custom-mail-table :deep(.el-table__row) {
-  cursor: pointer;
+.mail-detail {
+  min-height: 620px;
 }
 
-.unread-bold {
-  font-weight: 700;
-  color: #1f2f3d;
-}
-
-.detail-inner-card {
+.empty-state {
+  display: grid;
+  place-items: center;
   height: 100%;
-  box-sizing: border-box;
-  background-color: #fafafa;
-  border: 1px dashed #dcdfe6;
-}
-
-.detail-view {
-  padding: 4px;
-}
-
-.mail-subject-title {
-  margin: 0 0 16px 0;
-  color: #303133;
-  font-size: 20px;
-}
-
-.sender-info-block {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.sender-meta {
-  display: flex;
-  flex-direction: column;
-}
-
-.sender-name {
-  font-size: 14px;
-  color: #303133;
-}
-
-.sender-email {
-  font-size: 12px;
-  color: #909399;
-}
-
-.time-stamp-line {
-  margin-top: 10px;
-  font-size: 12px;
-  color: #909399;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.detail-recipients {
-  margin-bottom: 16px;
-  font-size: 13px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.recipients-label {
-  color: #606266;
-}
-
-.mx-1 {
-  margin: 2px;
-}
-
-.mail-content-display {
-  margin-top: 20px;
-  padding: 16px;
-  background: #ffffff;
-  border-radius: 6px;
-  border: 1px solid #ebeef5;
-  min-height: 220px;
-  line-height: 1.6;
-  color: #4c4d4f;
-  white-space: pre-wrap;
-}
-
-.attachments-section {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px dashed #e4e7ed;
-}
-
-.attach-title {
-  font-size: 14px;
-  font-weight: bold;
-  color: #606266;
-  margin-bottom: 8px;
-}
-
-.file-item-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  background: #f0f2f5;
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 13px;
-  color: #409eff;
-  margin-right: 8px;
-  margin-bottom: 8px;
-}
-
-.file-size {
-  color: #909399;
-  font-size: 11px;
-}
-
-.detail-empty-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 540px;
-}
-
-.drawer-footer-actions {
-  margin-top: 30px;
-  display: flex;
-  gap: 12px;
 }
 </style>
