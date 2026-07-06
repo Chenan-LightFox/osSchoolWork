@@ -29,4 +29,12 @@ public interface ReceiverMapper extends BaseMapper<Receiver> {
     @Update("UPDATE receiver SET deleted = 0, folder = 'INBOX' "
             + "WHERE mail_id = #{mailId} AND receiver_id = #{userId}")
     int restoreMail(@Param("mailId") Long mailId, @Param("userId") Long userId);
+
+    @Update("UPDATE receiver SET folder = 'SPAM', deleted = 0 "
+            + "WHERE mail_id = #{mailId} AND receiver_id = #{userId}")
+    int markAsSpam(@Param("mailId") Long mailId, @Param("userId") Long userId);
+
+    @Update("UPDATE receiver SET folder = 'INBOX', deleted = 0 "
+            + "WHERE mail_id = #{mailId} AND receiver_id = #{userId}")
+    int markAsNotSpam(@Param("mailId") Long mailId, @Param("userId") Long userId);
 }

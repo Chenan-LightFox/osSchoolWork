@@ -39,4 +39,10 @@ public interface MailService {
     void deleteDraft(Long userId, Long draftId);
 
     void permanentDelete(Long userId, Long mailId);
+
+    List<MailView> getSpam(Long userId);
+
+    void markAsSpam(Long userId, Long mailId);
+
+    void markAsNotSpam(Long userId, Long mailId);
 }

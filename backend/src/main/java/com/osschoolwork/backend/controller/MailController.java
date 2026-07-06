@@ -100,6 +100,14 @@ public class MailController {
         return ApiResponse.success(null);
     }
 
+    @PutMapping("/{mailId}/restore")
+    public ApiResponse<Void> restore(@PathVariable Long mailId,
+                                     HttpServletRequest request) {
+        Long userId = getUserId(request);
+        mailService.restoreMail(userId, mailId);
+        return ApiResponse.success(null);
+    }
+
     @DeleteMapping("/{mailId}/permanent")
     public ApiResponse<Void> permanentDelete(@PathVariable Long mailId,
                                               HttpServletRequest request) {
@@ -108,11 +116,27 @@ public class MailController {
         return ApiResponse.success(null);
     }
 
-    @PutMapping("/{mailId}/restore")
-    public ApiResponse<Void> restore(@PathVariable Long mailId,
-                                     HttpServletRequest request) {
+    // ==================== 垃圾邮件 ====================
+
+    @GetMapping("/spam")
+    public ApiResponse<List<MailView>> spam(HttpServletRequest request) {
         Long userId = getUserId(request);
-        mailService.restoreMail(userId, mailId);
+        return ApiResponse.success(mailService.getSpam(userId));
+    }
+
+    @PutMapping("/{mailId}/spam")
+    public ApiResponse<Void> markSpam(@PathVariable Long mailId,
+                                       HttpServletRequest request) {
+        Long userId = getUserId(request);
+        mailService.markAsSpam(userId, mailId);
+        return ApiResponse.success(null);
+    }
+
+    @PutMapping("/{mailId}/not-spam")
+    public ApiResponse<Void> markNotSpam(@PathVariable Long mailId,
+                                          HttpServletRequest request) {
+        Long userId = getUserId(request);
+        mailService.markAsNotSpam(userId, mailId);
         return ApiResponse.success(null);
     }
 

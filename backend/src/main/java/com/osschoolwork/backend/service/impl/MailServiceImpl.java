@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.osschoolwork.backend.client.SpamDetectionClient;
 import com.osschoolwork.backend.dto.MailDetailView;
 import com.osschoolwork.backend.dto.MailView;
 import com.osschoolwork.backend.dto.SendMailRequest;
@@ -41,6 +42,7 @@ public class MailServiceImpl implements MailService {
     private final UserMapper userMapper;
     private final WebSocketNotifier webSocketNotifier;
     private final AttachmentService attachmentService;
+    private final SpamDetectionClient spamDetectionClient;
 
     @Autowired
     public MailServiceImpl(MailMapper mailMapper,
@@ -48,13 +50,15 @@ public class MailServiceImpl implements MailService {
                            AttachmentMapper attachmentMapper,
                            UserMapper userMapper,
                            WebSocketNotifier webSocketNotifier,
-                           AttachmentService attachmentService) {
+                           AttachmentService attachmentService,
+                           SpamDetectionClient spamDetectionClient) {
         this.mailMapper = mailMapper;
         this.receiverMapper = receiverMapper;
         this.attachmentMapper = attachmentMapper;
         this.userMapper = userMapper;
         this.webSocketNotifier = webSocketNotifier;
         this.attachmentService = attachmentService;
+        this.spamDetectionClient = spamDetectionClient;
     }
 
     @Override
@@ -155,7 +159,7 @@ public class MailServiceImpl implements MailService {
         if (mail == null) {
             throw new BusinessException(404, "邮件不存在");
         }
-        if (mail.getSenderId().equals(userId)) {
+        if (userId.equals(mail.getSenderId())) {
             return;
         }
         int updated = receiverMapper.markAsRead(mailId, userId);
@@ -253,17 +257,19 @@ public class MailServiceImpl implements MailService {
         allEmails.addAll(ccEmails);
         Map<String, User> userByEmail = resolveUsersByEmails(allEmails);
 
+        boolean isSpam = checkSpam(sendRequest);
+
         List<Receiver> receivers = new ArrayList<>();
         for (String email : toEmails) {
             User receiverUser = userByEmail.get(email);
             if (receiverUser == null) continue;
-            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "TO"));
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "TO", isSpam));
         }
         for (String email : ccEmails) {
             if (toEmails.contains(email)) continue;
             User receiverUser = userByEmail.get(email);
             if (receiverUser == null) continue;
-            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "CC"));
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "CC", isSpam));
         }
         for (Receiver receiver : receivers) {
             receiverMapper.insert(receiver);
@@ -275,14 +281,7 @@ public class MailServiceImpl implements MailService {
         return mail.getId();
     }
 
-    private boolean hasAccess(Long userId, Mail mail) {
-        if (mail.getSenderId().equals(userId)) {
-            return true;
-        }
-        QueryWrapper<Receiver> wrapper = new QueryWrapper<>();
-        wrapper.eq("mail_id", mail.getId()).eq("receiver_id", userId);
-        return receiverMapper.selectCount(wrapper) > 0;
-    }
+    // ==================== 永久删除 ====================
 
     @Override
     public void deleteDraft(Long userId, Long draftId) {
@@ -300,7 +299,6 @@ public class MailServiceImpl implements MailService {
         if (mail == null) {
             throw new BusinessException(404, "邮件不存在");
         }
-        // 验证用户是否有权删除：是发件人，或者是垃圾箱中的收件人
         boolean isSender = userId.equals(mail.getSenderId());
         if (!isSender) {
             QueryWrapper<Receiver> trashCheck = new QueryWrapper<>();
@@ -312,13 +310,58 @@ public class MailServiceImpl implements MailService {
                 throw new BusinessException(403, "无权永久删除，请先将邮件移入垃圾箱");
             }
         }
-        // 先删除附件记录和收件关系（解除外键约束），再删除邮件
         attachmentMapper.delete(
                 new LambdaQueryWrapper<Attachment>().eq(Attachment::getMailId, mailId));
         receiverMapper.delete(
                 new LambdaQueryWrapper<Receiver>().eq(Receiver::getMailId, mailId));
-
         mailMapper.deleteById(mailId);
+    }
+
+    // ==================== 垃圾邮件（Python 模型识别） ====================
+
+    /** 调用 Python 垃圾邮件识别模型 */
+    private boolean checkSpam(SendMailRequest request) {
+        return spamDetectionClient.isSpam(request.getSubject(), request.getContent());
+    }
+
+    @Override
+    public List<MailView> getSpam(Long userId) {
+        return mailMapper.selectSpam(userId);
+    }
+
+    @Override
+    public void markAsSpam(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "邮件不存在");
+        }
+        int updated = receiverMapper.markAsSpam(mailId, userId);
+        if (updated == 0) {
+            throw new BusinessException(404, "邮件不存在或无权限");
+        }
+    }
+
+    @Override
+    public void markAsNotSpam(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "邮件不存在");
+        }
+        int updated = receiverMapper.markAsNotSpam(mailId, userId);
+        if (updated == 0) {
+            throw new BusinessException(404, "邮件不存在或不在垃圾邮件中");
+        }
+    }
+
+    // ==================== 私有辅助方法 ====================
+
+    private boolean hasAccess(Long userId, Mail mail) {
+        if (userId.equals(mail.getSenderId())) {
+            return true;
+        }
+        QueryWrapper<Receiver> wrapper = new QueryWrapper<>();
+        wrapper.eq("mail_id", mail.getId()).eq("receiver_id", userId);
+        return receiverMapper.selectCount(wrapper) > 0;
     }
 
     private Map<String, User> resolveUsersByEmails(Set<String> emails) {
@@ -337,14 +380,14 @@ public class MailServiceImpl implements MailService {
         return users.stream().collect(Collectors.toMap(User::getEmail, Function.identity()));
     }
 
-    private Receiver buildReceiver(Long mailId, Long receiverId, String type) {
+    private Receiver buildReceiver(Long mailId, Long receiverId, String type, boolean isSpam) {
         Receiver receiver = new Receiver();
         receiver.setMailId(mailId);
         receiver.setReceiverId(receiverId);
         receiver.setReceiverType(type);
         receiver.setIsRead(0);
         receiver.setDeleted(0);
-        receiver.setFolder("INBOX");
+        receiver.setFolder(isSpam ? "SPAM" : "INBOX");
         return receiver;
     }
 
@@ -359,6 +402,9 @@ public class MailServiceImpl implements MailService {
         allEmails.addAll(ccEmails);
         Map<String, User> userByEmail = resolveUsersByEmails(allEmails);
 
+        // 调用 Python 模型进行垃圾邮件检测
+        boolean isSpam = checkSpam(request);
+
         Mail mail = new Mail();
         mail.setSenderId(userId);
         mail.setSubject(request.getSubject());
@@ -371,13 +417,13 @@ public class MailServiceImpl implements MailService {
         for (String email : toEmails) {
             User receiverUser = userByEmail.get(email);
             if (receiverUser == null) continue;
-            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "TO"));
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "TO", isSpam));
         }
         for (String email : ccEmails) {
             if (toEmails.contains(email)) continue;
             User receiverUser = userByEmail.get(email);
             if (receiverUser == null) continue;
-            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "CC"));
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "CC", isSpam));
         }
         for (Receiver receiver : receivers) {
             receiverMapper.insert(receiver);

@@ -91,4 +91,17 @@ public interface MailMapper extends BaseMapper<Mail> {
             + "AND m.status = 'DRAFT' "
             + "ORDER BY m.send_time DESC")
     List<MailView> selectDrafts(@Param("userId") Long userId);
+
+    @Select("SELECT m.id, m.sender_id, u.username AS sender_name, u.email AS sender_email, "
+            + "m.subject, LEFT(m.content, 100) AS content_preview, "
+            + "r.is_read, r.receiver_type, m.send_time, "
+            + "IF((SELECT COUNT(*) FROM attachment a WHERE a.mail_id = m.id) > 0, TRUE, FALSE) AS has_attachment "
+            + "FROM mail m "
+            + "JOIN receiver r ON r.mail_id = m.id "
+            + "JOIN user u ON u.id = m.sender_id "
+            + "WHERE r.receiver_id = #{userId} "
+            + "AND r.folder = 'SPAM' "
+            + "AND r.deleted = 0 "
+            + "ORDER BY m.send_time DESC")
+    List<MailView> selectSpam(@Param("userId") Long userId);
 }

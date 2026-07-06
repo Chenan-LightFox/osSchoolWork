@@ -15,6 +15,9 @@ export const markMailAsRead = (mailId) => api.post(`/mail/${mailId}/read`)
 export const trashMail = (mailId) => api.delete(`/mail/${mailId}`)
 export const restoreMail = (mailId) => api.put(`/mail/${mailId}/restore`)
 export const permanentDelete = (mailId) => api.delete(`/mail/${mailId}/permanent`)
+export const getSpam = () => api.get('/mail/spam')
+export const markAsSpam = (mailId) => api.put(`/mail/${mailId}/spam`)
+export const markAsNotSpam = (mailId) => api.put(`/mail/${mailId}/not-spam`)
 
 /** 带附件发送邮件（multipart/form-data） */
 export const sendMailWithAttachments = (payload, files) => {

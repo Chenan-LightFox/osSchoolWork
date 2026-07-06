@@ -20,6 +20,9 @@ import {
   restoreMail,
   permanentDelete,
   downloadAttachment,
+  getSpam,
+  markAsSpam,
+  markAsNotSpam,
 } from '@/services/mail'
 import { createMailSocket } from '@/services/ws'
 
@@ -29,6 +32,7 @@ const tabs = [
   { label: '已发送', key: 'sent' },
   { label: '草稿箱', key: 'draft' },
   { label: '垃圾箱', key: 'trash' },
+  { label: '垃圾邮件', key: 'spam' },
 ]
 const activeTab = ref('inbox')
 const mails = ref([])
@@ -85,6 +89,8 @@ const loadMails = async () => {
       mails.value = await getDrafts()
     } else if (activeTab.value === 'trash') {
       mails.value = await getTrash()
+    } else if (activeTab.value === 'spam') {
+      mails.value = await getSpam()
     }
   } catch (error) {
     ElMessage.error(error.message || '加载邮件失败')
@@ -263,6 +269,52 @@ const handleRestore = async (mail) => {
   }
 }
 
+const handlePermanentDelete = async (mail) => {
+  try {
+    await ElMessageBox.confirm(
+      '永久删除后无法恢复，确定要彻底删除该邮件吗？',
+      '确认永久删除',
+      { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消' }
+    )
+    await permanentDelete(mail.id)
+    ElMessage.success('已永久删除')
+    await loadMails()
+    if (selectedMail.value?.id === mail.id) {
+      selectedMail.value = null
+    }
+  } catch (error) {
+    if (error !== 'cancel' && error?.message) {
+      ElMessage.error(error.message || '删除失败')
+    }
+  }
+}
+
+const handleMarkSpam = async (mail) => {
+  try {
+    await markAsSpam(mail.id)
+    ElMessage.success('已标记为垃圾邮件')
+    await loadMails()
+    if (selectedMail.value?.id === mail.id) {
+      selectedMail.value = null
+    }
+  } catch (error) {
+    ElMessage.error(error.message || '操作失败')
+  }
+}
+
+const handleMarkNotSpam = async (mail) => {
+  try {
+    await markAsNotSpam(mail.id)
+    ElMessage.success('已移回收件箱')
+    await loadMails()
+    if (selectedMail.value?.id === mail.id) {
+      selectedMail.value = null
+    }
+  } catch (error) {
+    ElMessage.error(error.message || '操作失败')
+  }
+}
+
 const handleSocketMessage = async (event) => {
   let payload = null
   try {
@@ -301,26 +353,6 @@ const closeSocket = () => {
   }
 }
 
-const handlePermanentDelete = async (mail) => {
-  try {
-    await ElMessageBox.confirm(
-      '永久删除后无法恢复，确定要彻底删除该邮件吗？',
-      '确认永久删除',
-      { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消' }
-    )
-    await permanentDelete(mail.id)
-    ElMessage.success('已永久删除')
-    await loadMails()
-    if (selectedMail.value?.id === mail.id) {
-      selectedMail.value = null
-    }
-  } catch (error) {
-    if (error !== 'cancel' && error?.message) {
-      ElMessage.error(error.message || '删除失败')
-    }
-  }
-}
-
 const handleDownload = async (file) => {
   try {
     await downloadAttachment(file.id, file.fileName)
@@ -331,8 +363,9 @@ const handleDownload = async (file) => {
 
 const isDraftTab = computed(() => activeTab.value === 'draft')
 const isTrashTab = computed(() => activeTab.value === 'trash')
+const isSpamTab = computed(() => activeTab.value === 'spam')
 const isInboxTab = computed(() => activeTab.value === 'inbox')
-const showDetail = computed(() => !isDraftTab.value && !isTrashTab.value)
+const showDetail = computed(() => !isDraftTab.value && !isTrashTab.value && !isSpamTab.value)
 
 watch(activeTab, () => { searchKeyword.value = ''; loadMails() })
 onMounted(() => { loadMails(); connectSocket() })
@@ -375,6 +408,10 @@ onBeforeUnmount(closeSocket)
           <el-menu-item index="trash">
             <el-icon><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></el-icon>
             <span>垃圾箱</span>
+          </el-menu-item>
+          <el-menu-item index="spam">
+            <el-icon><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.73 3H8.27L3 8.27v7.46L8.27 21h7.46L21 15.73V8.27L15.73 3zM12 17.3c-.72 0-1.3-.58-1.3-1.3 0-.72.58-1.3 1.3-1.3.72 0 1.3.58 1.3 1.3 0 .72-.58 1.3-1.3 1.3zm1-4.3h-2V7h2v6z"/></svg></el-icon>
+            <span>垃圾邮件</span>
           </el-menu-item>
         </el-menu>
 
@@ -448,7 +485,7 @@ onBeforeUnmount(closeSocket)
                   </template>
                 </el-table-column>
 
-                <el-table-column label="操作" width="100" align="center" fixed="right">
+                <el-table-column label="操作" width="130" align="center" fixed="right">
                   <template #default="{ row }">
                     <template v-if="isDraftTab">
                       <el-button size="small" type="primary" :icon="Edit" circle @click.stop="editDraft(row)" title="编辑草稿" />
@@ -458,8 +495,13 @@ onBeforeUnmount(closeSocket)
                       <el-button size="small" type="success" :icon="RefreshRight" circle @click.stop="handleRestore(row)" title="恢复邮件" />
                       <el-button size="small" type="danger" :icon="Warning" circle @click.stop="handlePermanentDelete(row)" title="永久删除" style="margin-left: 4px;" />
                     </template>
+                    <template v-else-if="isSpamTab">
+                      <el-button size="small" type="primary" :icon="RefreshRight" circle @click.stop="handleMarkNotSpam(row)" title="非垃圾邮件" />
+                      <el-button size="small" type="danger" :icon="Delete" circle @click.stop="handleTrash(row)" title="移到垃圾箱" style="margin-left: 4px;" />
+                    </template>
                     <template v-else>
-                      <el-button size="small" type="danger" plain :icon="Delete" circle @click.stop="handleTrash(row)" title="移到垃圾箱" />
+                      <el-button size="small" type="warning" plain :icon="Warning" circle @click.stop="handleMarkSpam(row)" title="标记为垃圾邮件" />
+                      <el-button size="small" type="danger" plain :icon="Delete" circle @click.stop="handleTrash(row)" title="移到垃圾箱" style="margin-left: 4px;" />
                     </template>
                   </template>
                 </el-table-column>
