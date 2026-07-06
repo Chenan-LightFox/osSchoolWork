@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.osschoolwork.backend.dto.MailDetailView;
 import com.osschoolwork.backend.dto.MailView;
@@ -192,6 +193,88 @@ public class MailServiceImpl implements MailService {
         }
     }
 
+    @Override
+    public List<MailView> getDrafts(Long userId) {
+        return mailMapper.selectDrafts(userId);
+    }
+
+    @Transactional
+    @Override
+    public Long saveDraft(Long userId, SendMailRequest request, Long draftId) {
+        Mail mail;
+        if (draftId != null) {
+            mail = mailMapper.selectById(draftId);
+            if (mail == null || !mail.getSenderId().equals(userId) || !"DRAFT".equals(mail.getStatus())) {
+                throw new BusinessException(404, "草稿不存在");
+            }
+            mail.setSubject(request.getSubject() != null ? request.getSubject() : "");
+            mail.setContent(request.getContent());
+        } else {
+            mail = new Mail();
+            mail.setSenderId(userId);
+            mail.setSubject(request.getSubject() != null ? request.getSubject() : "");
+            mail.setContent(request.getContent());
+            mail.setStatus("DRAFT");
+            mail.setSendTime(LocalDateTime.now());
+            mailMapper.insert(mail);
+            return mail.getId();
+        }
+        mail.setSendTime(LocalDateTime.now());
+        mailMapper.updateById(mail);
+        return mail.getId();
+    }
+
+    @Transactional
+    @Override
+    public Long sendDraft(Long userId, Long draftId, SendMailRequest request) {
+        Mail mail = mailMapper.selectById(draftId);
+        if (mail == null || !mail.getSenderId().equals(userId) || !"DRAFT".equals(mail.getStatus())) {
+            throw new BusinessException(404, "草稿不存在");
+        }
+        mail.setSubject(request.getSubject() != null ? request.getSubject() : mail.getSubject());
+        mail.setContent(request.getContent() != null ? request.getContent() : mail.getContent());
+        mail.setStatus("SENT");
+        mail.setSendTime(LocalDateTime.now());
+        mailMapper.updateById(mail);
+
+        SendMailRequest sendRequest = new SendMailRequest();
+        sendRequest.setSubject(mail.getSubject());
+        sendRequest.setContent(mail.getContent());
+        sendRequest.setTo(request.getTo());
+        sendRequest.setCc(request.getCc());
+
+        Set<String> toEmails = sendRequest.getTo() == null ? new LinkedHashSet<>() : new LinkedHashSet<>(sendRequest.getTo());
+        Set<String> ccEmails = sendRequest.getCc() == null ? new LinkedHashSet<>() : new LinkedHashSet<>(sendRequest.getCc());
+        if (toEmails.isEmpty() && ccEmails.isEmpty()) {
+            throw new BusinessException(400, "请至少填写一个收件人");
+        }
+
+        Set<String> allEmails = new LinkedHashSet<>(toEmails);
+        allEmails.addAll(ccEmails);
+        Map<String, User> userByEmail = resolveUsersByEmails(allEmails);
+
+        List<Receiver> receivers = new ArrayList<>();
+        for (String email : toEmails) {
+            User receiverUser = userByEmail.get(email);
+            if (receiverUser == null) continue;
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "TO"));
+        }
+        for (String email : ccEmails) {
+            if (toEmails.contains(email)) continue;
+            User receiverUser = userByEmail.get(email);
+            if (receiverUser == null) continue;
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "CC"));
+        }
+        for (Receiver receiver : receivers) {
+            receiverMapper.insert(receiver);
+        }
+        Set<Long> receiverIds = receivers.stream()
+                .map(Receiver::getReceiverId)
+                .collect(Collectors.toSet());
+        webSocketNotifier.notifyNewMail(receiverIds, mail.getId(), userId, mail.getSubject());
+        return mail.getId();
+    }
+
     private boolean hasAccess(Long userId, Mail mail) {
         if (mail.getSenderId().equals(userId)) {
             return true;
@@ -199,6 +282,70 @@ public class MailServiceImpl implements MailService {
         QueryWrapper<Receiver> wrapper = new QueryWrapper<>();
         wrapper.eq("mail_id", mail.getId()).eq("receiver_id", userId);
         return receiverMapper.selectCount(wrapper) > 0;
+    }
+
+    @Override
+    public void deleteDraft(Long userId, Long draftId) {
+        Mail mail = mailMapper.selectById(draftId);
+        if (mail == null || !mail.getSenderId().equals(userId) || !"DRAFT".equals(mail.getStatus())) {
+            throw new BusinessException(404, "草稿不存在");
+        }
+        mailMapper.deleteById(draftId);
+    }
+
+    @Transactional
+    @Override
+    public void permanentDelete(Long userId, Long mailId) {
+        Mail mail = mailMapper.selectById(mailId);
+        if (mail == null) {
+            throw new BusinessException(404, "邮件不存在");
+        }
+        // 验证用户是否有权删除：是发件人，或者是垃圾箱中的收件人
+        boolean isSender = userId.equals(mail.getSenderId());
+        if (!isSender) {
+            QueryWrapper<Receiver> trashCheck = new QueryWrapper<>();
+            trashCheck.eq("mail_id", mailId)
+                    .eq("receiver_id", userId)
+                    .eq("deleted", 1)
+                    .eq("folder", "TRASH");
+            if (receiverMapper.selectCount(trashCheck) == 0) {
+                throw new BusinessException(403, "无权永久删除，请先将邮件移入垃圾箱");
+            }
+        }
+        // 先删除附件记录和收件关系（解除外键约束），再删除邮件
+        attachmentMapper.delete(
+                new LambdaQueryWrapper<Attachment>().eq(Attachment::getMailId, mailId));
+        receiverMapper.delete(
+                new LambdaQueryWrapper<Receiver>().eq(Receiver::getMailId, mailId));
+
+        mailMapper.deleteById(mailId);
+    }
+
+    private Map<String, User> resolveUsersByEmails(Set<String> emails) {
+        QueryWrapper<User> userQuery = new QueryWrapper<>();
+        userQuery.in("email", emails);
+        List<User> users = userMapper.selectList(userQuery);
+        Set<String> foundEmails = users.stream()
+                .map(User::getEmail)
+                .collect(Collectors.toSet());
+        List<String> missingEmails = emails.stream()
+                .filter(email -> !foundEmails.contains(email))
+                .collect(Collectors.toList());
+        if (!missingEmails.isEmpty()) {
+            throw new BusinessException(400, "以下收件人不存在: " + String.join(", ", missingEmails));
+        }
+        return users.stream().collect(Collectors.toMap(User::getEmail, Function.identity()));
+    }
+
+    private Receiver buildReceiver(Long mailId, Long receiverId, String type) {
+        Receiver receiver = new Receiver();
+        receiver.setMailId(mailId);
+        receiver.setReceiverId(receiverId);
+        receiver.setReceiverType(type);
+        receiver.setIsRead(0);
+        receiver.setDeleted(0);
+        receiver.setFolder("INBOX");
+        return receiver;
     }
 
     private SendResult createMailAndReceivers(Long userId, SendMailRequest request) {
@@ -210,22 +357,7 @@ public class MailServiceImpl implements MailService {
 
         Set<String> allEmails = new LinkedHashSet<>(toEmails);
         allEmails.addAll(ccEmails);
-        QueryWrapper<User> userQuery = new QueryWrapper<>();
-        userQuery.in("email", allEmails);
-        List<User> users = userMapper.selectList(userQuery);
-
-        Set<String> foundEmails = users.stream()
-                .map(User::getEmail)
-                .collect(Collectors.toSet());
-        List<String> missingEmails = allEmails.stream()
-                .filter(email -> !foundEmails.contains(email))
-                .collect(Collectors.toList());
-        if (!missingEmails.isEmpty()) {
-            throw new BusinessException(400, "以下收件人不存在: " + String.join(", ", missingEmails));
-        }
-
-        Map<String, User> userByEmail = users.stream()
-                .collect(Collectors.toMap(User::getEmail, Function.identity()));
+        Map<String, User> userByEmail = resolveUsersByEmails(allEmails);
 
         Mail mail = new Mail();
         mail.setSenderId(userId);
@@ -238,34 +370,14 @@ public class MailServiceImpl implements MailService {
         List<Receiver> receivers = new ArrayList<>();
         for (String email : toEmails) {
             User receiverUser = userByEmail.get(email);
-            if (receiverUser == null) {
-                continue;
-            }
-            Receiver receiver = new Receiver();
-            receiver.setMailId(mail.getId());
-            receiver.setReceiverId(receiverUser.getId());
-            receiver.setReceiverType("TO");
-            receiver.setIsRead(0);
-            receiver.setDeleted(0);
-            receiver.setFolder("INBOX");
-            receivers.add(receiver);
+            if (receiverUser == null) continue;
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "TO"));
         }
         for (String email : ccEmails) {
-            if (toEmails.contains(email)) {
-                continue;
-            }
+            if (toEmails.contains(email)) continue;
             User receiverUser = userByEmail.get(email);
-            if (receiverUser == null) {
-                continue;
-            }
-            Receiver receiver = new Receiver();
-            receiver.setMailId(mail.getId());
-            receiver.setReceiverId(receiverUser.getId());
-            receiver.setReceiverType("CC");
-            receiver.setIsRead(0);
-            receiver.setDeleted(0);
-            receiver.setFolder("INBOX");
-            receivers.add(receiver);
+            if (receiverUser == null) continue;
+            receivers.add(buildReceiver(mail.getId(), receiverUser.getId(), "CC"));
         }
         for (Receiver receiver : receivers) {
             receiverMapper.insert(receiver);

@@ -100,11 +100,51 @@ public class MailController {
         return ApiResponse.success(null);
     }
 
+    @DeleteMapping("/{mailId}/permanent")
+    public ApiResponse<Void> permanentDelete(@PathVariable Long mailId,
+                                              HttpServletRequest request) {
+        Long userId = getUserId(request);
+        mailService.permanentDelete(userId, mailId);
+        return ApiResponse.success(null);
+    }
+
     @PutMapping("/{mailId}/restore")
     public ApiResponse<Void> restore(@PathVariable Long mailId,
                                      HttpServletRequest request) {
         Long userId = getUserId(request);
         mailService.restoreMail(userId, mailId);
+        return ApiResponse.success(null);
+    }
+
+    // ==================== 草稿 ====================
+
+    @GetMapping("/drafts")
+    public ApiResponse<List<MailView>> drafts(HttpServletRequest request) {
+        Long userId = getUserId(request);
+        return ApiResponse.success(mailService.getDrafts(userId));
+    }
+
+    @PostMapping("/draft")
+    public ApiResponse<Long> saveDraft(@RequestBody SendMailRequest body,
+                                       @RequestParam(value = "draftId", required = false) Long draftId,
+                                       HttpServletRequest request) {
+        Long userId = getUserId(request);
+        return ApiResponse.success(mailService.saveDraft(userId, body, draftId));
+    }
+
+    @PostMapping("/draft/{draftId}/send")
+    public ApiResponse<Long> sendDraft(@PathVariable Long draftId,
+                                       @Valid @RequestBody SendMailRequest body,
+                                       HttpServletRequest request) {
+        Long userId = getUserId(request);
+        return ApiResponse.success(mailService.sendDraft(userId, draftId, body));
+    }
+
+    @DeleteMapping("/draft/{draftId}")
+    public ApiResponse<Void> deleteDraft(@PathVariable Long draftId,
+                                          HttpServletRequest request) {
+        Long userId = getUserId(request);
+        mailService.deleteDraft(userId, draftId);
         return ApiResponse.success(null);
     }
 

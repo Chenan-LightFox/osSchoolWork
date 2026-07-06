@@ -29,4 +29,14 @@ public interface MailService {
     List<MailView> getTrash(Long userId);
 
     void restoreMail(Long userId, Long mailId);
+
+    List<MailView> getDrafts(Long userId);
+
+    Long saveDraft(Long userId, SendMailRequest request, Long draftId);
+
+    Long sendDraft(Long userId, Long draftId, SendMailRequest request);
+
+    void deleteDraft(Long userId, Long draftId);
+
+    void permanentDelete(Long userId, Long mailId);
 }

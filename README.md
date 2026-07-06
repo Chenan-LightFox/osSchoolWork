@@ -14,9 +14,20 @@
 
 ## 1.1 当前已实现功能
 
-- 后端完成用户注册、登录与 JWT 认证
-- 后端新增邮件系统接口：收件箱、发件箱、搜索、详情、发送、标记已读、移入垃圾箱
-- 前端 Dashboard 已接入邮件功能，可直接查看收件箱/发件箱、读取邮件详情、发送邮件
+| 模块 | 功能 | 后端 | 前端 |
+|------|------|:----:|:----:|
+| 用户 | 注册（邮箱校验、密码 BCrypt 加密） | ✅ | ✅ |
+| 用户 | 登录（JWT 签发） | ✅ | ✅ |
+| 用户 | 路由守卫（未登录拦截） | ✅ | ✅ |
+| 邮件 | 收件箱 / 已发送 | ✅ | ✅ |
+| 邮件 | 抄送 CC | ✅ | ✅ |
+| 邮件 | 全文搜索（主题/内容/发件人） | ✅ | ✅ |
+| 邮件 | 已读 / 未读标记 | ✅ | ✅ |
+| 邮件 | 移入垃圾箱 / 恢复 | ✅ | ✅ |
+| 邮件 | 草稿箱（保存 / 编辑 / 发送） | ✅ | ✅ |
+| 附件 | 上传（Multipart / 文件系统存储） | ✅ | ✅ |
+| 附件 | 下载（blob 流式返回） | ✅ | ✅ |
+| 推送 | WebSocket 实时新邮件通知 | ✅ | ✅ |
 
 ---
 
@@ -35,18 +46,18 @@
 erDiagram
     USER {
         bigint id PK "自增主键"
-        varchar email UK "邮箱，唯一"
-        varchar username "用户名"
-        varchar password "BCrypt 加密"
+        varchar(255) email UK "邮箱，唯一"
+        varchar(100) username "用户名"
+        varchar(255) password "BCrypt 加密存储"
         datetime create_time "注册时间"
     }
 
     MAIL {
         bigint id PK "自增主键"
         bigint sender_id FK "发件人 → user.id"
-        varchar subject "主题"
+        varchar(500) subject "邮件主题"
         longtext content "正文"
-        varchar status "DRAFT / SENT"
+        varchar(20) status "DRAFT 草稿 / SENT 已发送"
         datetime send_time "发送时间"
     }
 
@@ -54,28 +65,28 @@ erDiagram
         bigint id PK "自增主键"
         bigint mail_id FK "邮件 → mail.id"
         bigint receiver_id FK "收件人 → user.id"
-        varchar receiver_type "TO / CC"
-        tinyint is_read "0未读 1已读"
-        tinyint deleted "0正常 1删除"
-        varchar folder "INBOX / TRASH"
+        varchar(10) receiver_type "TO 收件 / CC 抄送"
+        tinyint(1) is_read "0 未读 / 1 已读"
+        tinyint(1) deleted "0 正常 / 1 已删除"
+        varchar(20) folder "INBOX 收件箱 / TRASH 垃圾箱"
     }
 
     ATTACHMENT {
         bigint id PK "自增主键"
         bigint mail_id FK "邮件 → mail.id"
-        varchar file_name "原始文件名"
-        varchar file_path "磁盘存储路径"
+        varchar(500) file_name "原始文件名"
+        varchar(1000) file_path "磁盘存储路径"
         bigint file_size "文件大小(字节)"
         datetime upload_time "上传时间"
     }
 
-    USER ||--o{ MAIL : "发送"
-    USER ||--o{ RECEIVER : "接收"
-    MAIL ||--o{ RECEIVER : "包含"
-    MAIL ||--o{ ATTACHMENT : "包含"
-```
+    USER ||--o{ MAIL : "发送（sender_id）"
+    USER ||--o{ RECEIVER : "接收（receiver_id）"
+    MAIL ||--o{ RECEIVER : "拥有收件关系"
+    MAIL ||--o{ ATTACHMENT : "拥有附件"
 
-> User ↔ Mail 为多对多，通过 receiver 表实现。
+    %% RECEIVER 表唯一约束: (mail_id, receiver_id, receiver_type)
+    %% User ↔ Mail 为多对多关系，通过 receiver 表实现
 
 ---
 

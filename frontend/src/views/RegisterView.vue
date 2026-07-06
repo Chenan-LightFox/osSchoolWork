@@ -58,11 +58,7 @@ const handleSubmit = async () => {
     })
     setAuth({
       token: data.token,
-      user: {
-        id: data.userId,
-        email: data.email,
-        username: data.username,
-      },
+      user: data.user,
     })
     ElMessage.success('注册成功')
     router.push({ name: 'dashboard' })

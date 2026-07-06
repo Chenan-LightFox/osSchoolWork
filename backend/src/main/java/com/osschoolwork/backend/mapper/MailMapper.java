@@ -77,4 +77,18 @@ public interface MailMapper extends BaseMapper<Mail> {
             + "AND r.folder = 'TRASH' "
             + "ORDER BY m.send_time DESC")
     List<MailView> selectTrash(@Param("userId") Long userId);
+
+    /**
+     * 草稿箱：当前用户保存的草稿列表（仅按发送者查询）
+     */
+    @Select("SELECT m.id, m.sender_id, u.username AS sender_name, u.email AS sender_email, "
+            + "m.subject, LEFT(m.content, 100) AS content_preview, "
+            + "0 AS is_read, 'DRAFT' AS receiver_type, m.send_time, "
+            + "IF((SELECT COUNT(*) FROM attachment a WHERE a.mail_id = m.id) > 0, TRUE, FALSE) AS has_attachment "
+            + "FROM mail m "
+            + "JOIN user u ON u.id = m.sender_id "
+            + "WHERE m.sender_id = #{userId} "
+            + "AND m.status = 'DRAFT' "
+            + "ORDER BY m.send_time DESC")
+    List<MailView> selectDrafts(@Param("userId") Long userId);
 }

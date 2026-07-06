@@ -24,7 +24,7 @@ const handleLogout = () => {
   <el-container class="app-shell">
     <el-header class="app-header">
       <div class="app-brand" @click="router.push({ name: 'dashboard' })">
-        osSchoolWork
+        邮件系统
       </div>
       <div class="app-actions">
         <template v-if="isAuthenticated">
